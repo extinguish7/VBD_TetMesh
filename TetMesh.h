@@ -199,10 +199,10 @@ namespace VBD {
         }
 
         /**
-         * @brief 初始化网格
+         * @brief 初始化网格 (基于密度自动分配质量)
          *
          * @param positions 顶点初始位置
-         * @param masses 顶点质量
+         * @param density 材料密度 (例如水的密度为 1000.0e-12)
          * @param tetIndices 四面体顶点索引
          * @param mu 材料参数 μ
          * @param lambda 材料参数 λ
@@ -210,7 +210,7 @@ namespace VBD {
          */
         void initialize(
             const std::vector<Vec3>& positions,
-            const std::vector<FloatingType>& masses,
+            FloatingType density,
             const std::vector<TetVIdsArr>& tetIndices,
             FloatingType mu,
             FloatingType lambda,
@@ -229,11 +229,11 @@ namespace VBD {
             mVertPos.setZero();
             mVertPrevPos.setZero();
             mVelocity.setZero();
+            vertexMass.setZero(); // <--- 【修改2：先清零，准备后续累加】
 
             for (size_t i = 0; i < numVerts; ++i) {
                 mVertPos.col(i) = positions[i];
                 mVertPrevPos.col(i) = positions[i];
-                vertexMass(i) = masses[i];
             }
 
             // 初始化四面体
@@ -241,13 +241,20 @@ namespace VBD {
             tetRestVol.resize(numTets);
             tetMu.resize(numTets, mu);
             tetLambda.resize(numTets, lambda);
-
-            // 计算静止体积并建立邻接关系
             vertAdjacentTets.resize(numVerts);
+
+            // 【修改3：计算四面体体积，并根据密度将质量均分给4个顶点】
             for (size_t i = 0; i < numTets; ++i) {
-                tetRestVol[i] = computeTetVolume(i);
+                FloatingType vol = computeRestVolume(i);
+                tetRestVol[i] = vol;
+
+                // 当前四面体的总质量 = 体积 * 密度
+                FloatingType tetMass = vol * density;
+
                 for (int j = 0; j < 4; ++j) {
                     vertAdjacentTets[tets[i][j]].push_back(static_cast<IdType>(i));
+                    // 将四面体的质量均分给4个顶点 (使用 += 因为一个顶点可能被多个四面体共享)
+                    vertexMass(tets[i][j]) += tetMass / 4.0;
                 }
             }
 
