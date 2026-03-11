@@ -177,7 +177,8 @@ __global__ void vbd_solve_color_kernel(
             Real local_H[9], local_f[3];
             Real vol = d_tetRestVol[tet_id];
 
-            computeTetContributionLocal(F, DmInv, mu, lambda, vol, localIdx, local_H, local_f);
+            //computeTetContributionLocal(F, DmInv, mu, lambda, vol, localIdx, local_H, local_f);
+            computeTetContributionLocalCorotated(F, DmInv, mu, lambda, vol, localIdx, local_H, local_f);
 
             // 【优化核心】将计算结果累加到私有寄存器中，彻底移除原子操作
             for (int k = 0; k < 9; ++k) my_H[k] += local_H[k];
@@ -204,9 +205,10 @@ __global__ void vbd_solve_color_kernel(
         Real coeff = m * dtSqrReciprocal;
 
         // 强制转换常量以适配可能得 double / float (根据你的 Real 定义)
-        final_H[0] = coeff + 1e-6f;
-        final_H[4] = coeff + 1e-6f;
-        final_H[8] = coeff + 1e-6f;
+        Real reg = coeff * 1.000001f;
+        final_H[0] = reg;
+        final_H[4] = reg;
+        final_H[8] = reg;
 
         final_f[0] = coeff * (d_inertia[v_id * 3 + 0] - d_positions[v_id * 3 + 0]);
         final_f[1] = coeff * (d_inertia[v_id * 3 + 1] - d_positions[v_id * 3 + 1]);
@@ -224,6 +226,10 @@ __global__ void vbd_solve_color_kernel(
             d_positions[v_id * 3 + 0] += dx[0];
             d_positions[v_id * 3 + 1] += dx[1];
             d_positions[v_id * 3 + 2] += dx[2];
+        }
+        else
+        {
+			printf("!!!!!! Warning: Singular system at vertex %d in color group, skipping update. Consider increasing regularization. !!!!!\n", v_id);
         }
     }
 }
@@ -324,6 +330,9 @@ namespace VBD {
 
     // 【新增】步骤E：完整的带有 Chebyshev 的迭代函数
     void VBD_GPU_Solver::solveVBD(int numIterations, Real dtSqrReciprocal, Real mu, Real lambda, bool useAcceleration, Real rho) {
+
+        cudaMemcpy(d_positions, d_inertia, numVerts * 3 * sizeof(Real), cudaMemcpyDeviceToDevice);
+
         Real omega = 1.0f;
 
         for (int iter = 0; iter < numIterations; ++iter) {

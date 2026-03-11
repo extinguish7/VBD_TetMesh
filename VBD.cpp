@@ -8,7 +8,7 @@
 // 在文件顶部添加全局计时器定义
 
 namespace VBD {
-	PerfTimer g_perfTimer;
+	//PerfTimer g_perfTimer;
 
     VBDsolver::VBDsolver() {
     }
@@ -43,7 +43,7 @@ namespace VBD {
 
             // 计算 Dm (参考配置下的边向量)
             Matrix3r Dm;
-            ElasticEnergy::compute_Dm(Dm, mesh.mVertPos, tet);
+            ElasticEnergy::compute_Dm(Dm, mesh.mRestPos, tet);
 
             // 计算 Dm 的逆
             tetDmInv[tetId] = Dm.inverse();
@@ -130,14 +130,14 @@ namespace VBD {
                 Mat3 H = Mat3::Zero();
                 Vec3 f = Vec3::Zero();
 
-                g_perfTimer.start("solve_vertex");
+                //g_perfTimer.start("solve_vertex");
                 // 求解单个顶点
                 solveVertex(mesh, vertexId, H, f, dtSqrReciprocal);
-                g_perfTimer.end(); // solve_vertex
+                //g_perfTimer.end(); // solve_vertex
 
                 // 求解局部线性系统 H * dx = f
                 // 检查 H 是否奇异
-                g_perfTimer.start("solve_3x3_system");
+                //g_perfTimer.start("solve_3x3_system");
                 Real detH = H.determinant();
                 if (std::abs(detH) > EPSILON) {
 
@@ -151,7 +151,7 @@ namespace VBD {
                     // 更新顶点位置
                     mesh.vertex(vertexId) += dx;
                 }
-                g_perfTimer.end(); // solve_3x3_system
+                //g_perfTimer.end(); // solve_3x3_system
                 // 如果 H 奇异，跳过该顶点（论文 Section 3.2）
             }
         }
@@ -219,20 +219,20 @@ namespace VBD {
         // 材料参数向量
         std::vector<Real> material_params = { mu, lambda };
 
-        g_perfTimer.start("solve_Dm");
+        //g_perfTimer.start("solve_Dm");
 
         // 1. 计算当前配置下的 Ds 矩阵
         Matrix3r Ds;
         ElasticEnergy::compute_Dm(Ds, mesh.mVertPos, tet);
-        g_perfTimer.end(); // solve_Dm
+        //g_perfTimer.end(); // solve_Dm
 
-        g_perfTimer.start("solve_F");
+        //g_perfTimer.start("solve_F");
         // 2. 计算变形梯度 F = Ds * DmInv
         Matrix3r F;
         ElasticEnergy::compute_F(F, Ds, DmInv);
-        g_perfTimer.end(); // solve_F
+        //g_perfTimer.end(); // solve_F
 
-        g_perfTimer.start("solve_Hessian_and_Gradient");
+        //g_perfTimer.start("solve_Hessian_and_Gradient");
         Matrix12r eleHessian;
         Vec12 eleGradient;
         ElasticEnergy::compute_Hessian_and_Gradient(
@@ -244,7 +244,7 @@ namespace VBD {
             lambda, 
             mu, 
 			V0);
-        g_perfTimer.end();
+        //g_perfTimer.end();
 
 
         // 6. 提取该顶点的梯度 (3 维)
@@ -313,7 +313,7 @@ namespace VBD {
     void VBDsolver::simulate(TetMesh& mesh, int numFrames,
         std::function<void(int, TetMesh&)> callback) {
         energyHistory.clear();
-        g_perfTimer.reset();
+        //g_perfTimer.reset();
 
         for (int frame = 0; frame < numFrames; ++frame) {
             step(mesh);
@@ -326,7 +326,7 @@ namespace VBD {
             }
         }
         // 打印详细性能报告
-        g_perfTimer.printReport();
+        //g_perfTimer.printReport();
     }
 
 } // namespace VBD

@@ -122,4 +122,78 @@ namespace VBD_GPU {
             }
         }
     }
+
+    // ====== 新增：专为金属硬物设计的共旋线性弹性模型 (Corotated Linear Elasticity) ======
+    __device__ __forceinline__ void computeTetContributionLocalCorotated(
+        const Mat3d& F, const Mat3d& DmInv, Real mu, Real lambda, Real volume, int localNodeIdx,
+        Real out_H[9], Real out_f[3])
+    {
+        // 1. 极分解 (Polar Decomposition): 提取纯旋转矩阵 R (使用极速的高推算法 Higham's Method)
+        Mat3d R = F;
+        for (int iter = 0; iter < 5; ++iter) {
+            Real det = det3x3(R);
+            if (fabs(det) < 1e-8f) break; // 防止高度压扁时奇异
+
+            Mat3d C = computeCofactor(R); // R^{-T} = Cofactor(R) / det(R)
+            Real invDet = 1.0f / det;
+
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j) {
+                    R.m[i][j] = 0.5f * (R.m[i][j] + C.m[i][j] * invDet);
+                }
+            }
+        }
+
+        // 2. 计算第一类 Piola-Kirchhoff 应力 P
+        // 公式: P = 2*mu*(F - R) + lambda * tr(R^T * F - I) * R
+        Real tr = 0.0f;
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                tr += R.m[i][j] * F.m[i][j];
+            }
+        }
+        tr -= 3.0f; // 减去 I 的迹
+
+        Mat3d P;
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                P.m[i][j] = 2.0f * mu * (F.m[i][j] - R.m[i][j]) + lambda * tr * R.m[i][j];
+            }
+        }
+
+        // 3. 计算伴随向量 Qn (形状函数的空间偏导)
+        Real Qn[3] = { 0.0f, 0.0f, 0.0f };
+        if (localNodeIdx == 0) {
+            Qn[0] = -DmInv.m[0][0] - DmInv.m[1][0] - DmInv.m[2][0];
+            Qn[1] = -DmInv.m[0][1] - DmInv.m[1][1] - DmInv.m[2][1];
+            Qn[2] = -DmInv.m[0][2] - DmInv.m[1][2] - DmInv.m[2][2];
+        }
+        else {
+            Qn[0] = DmInv.m[localNodeIdx - 1][0];
+            Qn[1] = DmInv.m[localNodeIdx - 1][1];
+            Qn[2] = DmInv.m[localNodeIdx - 1][2];
+        }
+
+        // 4. 计算顶点的力梯度 f (即能量关于 x_n 的一阶导，由于求解器是 f = -dE/dx，这里抽出的是 dE/dx)
+        for (int i = 0; i < 3; ++i) {
+            out_f[i] = volume * (P.m[i][0] * Qn[0] + P.m[i][1] * Qn[1] + P.m[i][2] * Qn[2]);
+        }
+
+        // 5. 【终极绝招】使用近似的 SPD Hessian 矩阵 (基于 Projective Dynamics 假定)
+        // 忽略 dR/dF 的非线性项，得出的 Hessian 永远绝对正定，免疫所有数值爆炸！
+        // 公式: H_nn = Volume * [ 2*mu*(Qn·Qn)*I + lambda*(R*Qn)⊗(R*Qn) ]
+        Real Qn_sq = Qn[0] * Qn[0] + Qn[1] * Qn[1] + Qn[2] * Qn[2];
+
+        Real RQ[3];
+        for (int i = 0; i < 3; ++i) {
+            RQ[i] = R.m[i][0] * Qn[0] + R.m[i][1] * Qn[1] + R.m[i][2] * Qn[2];
+        }
+
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                Real H_ij = (i == j ? 2.0f * mu * Qn_sq : 0.0f) + lambda * RQ[i] * RQ[j];
+                out_H[i * 3 + j] = volume * H_ij;
+            }
+        }
+    }
 }

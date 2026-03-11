@@ -18,6 +18,7 @@ namespace VBD {
      */
     struct TetMesh {
         // 顶点数据
+        TVerticesMat mRestPos;          // 静止位置 (3 x N)
         TVerticesMat mVertPos;          // 当前位置 (3 x N)
         TVerticesMat mVertPrevPos;      // 上一帧位置 (3 x N)
         TVerticesMat mVelocity;         // 速度 (3 x N)
@@ -199,41 +200,47 @@ namespace VBD {
         }
 
         /**
-         * @brief 初始化网格 (基于密度自动分配质量)
+         * @brief 初始化网格 (基于双节点文件和密度自动分配质量)
          *
-         * @param positions 顶点初始位置
-         * @param density 材料密度 (例如水的密度为 1000.0e-12)
+         * @param rest_positions 顶点初始/静止位置
+         * @param current_positions 顶点当前/变形位置
+         * @param density 材料密度
          * @param tetIndices 四面体顶点索引
          * @param mu 材料参数 μ
          * @param lambda 材料参数 λ
          * @param fixedVerts 固定顶点索引
          */
         void initialize(
-            const std::vector<Vec3>& positions,
+            const std::vector<Vec3>& rest_positions,
+            const std::vector<Vec3>& current_positions,
             FloatingType density,
             const std::vector<TetVIdsArr>& tetIndices,
             FloatingType mu,
             FloatingType lambda,
             const std::vector<IdType>& fixedVerts = {}
         ) {
-            numVerts = positions.size();
+            numVerts = rest_positions.size();
             numTets = tetIndices.size();
 
             // 初始化顶点数据
+            mRestPos.resize(3, numVerts);
             mVertPos.resize(3, numVerts);
             mVertPrevPos.resize(3, numVerts);
             mVelocity.resize(3, numVerts);
             mInertia.resize(3, numVerts);
             vertexMass.resize(numVerts);
 
+            mRestPos.setZero();
             mVertPos.setZero();
             mVertPrevPos.setZero();
             mVelocity.setZero();
-            vertexMass.setZero(); // <--- 【修改2：先清零，准备后续累加】
+            vertexMass.setZero();
 
+            // 分别赋值静止位置和当前位置
             for (size_t i = 0; i < numVerts; ++i) {
-                mVertPos.col(i) = positions[i];
-                mVertPrevPos.col(i) = positions[i];
+                mRestPos.col(i) = rest_positions[i];
+                mVertPos.col(i) = current_positions[i];
+                mVertPrevPos.col(i) = current_positions[i]; // 将上一帧位置设为当前变形位置
             }
 
             // 初始化四面体
@@ -243,18 +250,18 @@ namespace VBD {
             tetLambda.resize(numTets, lambda);
             vertAdjacentTets.resize(numVerts);
 
-            // 【修改3：计算四面体体积，并根据密度将质量均分给4个顶点】
+            // 计算静止体积并分配质量
             for (size_t i = 0; i < numTets; ++i) {
                 FloatingType vol = computeRestVolume(i);
                 tetRestVol[i] = vol;
 
-                // 当前四面体的总质量 = 体积 * 密度
+                // 当前四面体的总质量 = 初始体积 * 密度
                 FloatingType tetMass = vol * density;
 
                 for (int j = 0; j < 4; ++j) {
                     vertAdjacentTets[tets[i][j]].push_back(static_cast<IdType>(i));
-                    // 将四面体的质量均分给4个顶点 (使用 += 因为一个顶点可能被多个四面体共享)
-                    vertexMass(tets[i][j]) += tetMass / 4.0;
+                    // 将四面体的质量均分给4个顶点
+                    vertexMass(tets[i][j]) += tetMass / 4.0f;
                 }
             }
 
@@ -279,14 +286,15 @@ namespace VBD {
         }
 
         /**
-         * @brief 计算四面体静止体积（用于初始化）
+         * @brief 计算四面体静止体积（用于初始化质量和弹力基准）
          */
         FloatingType computeRestVolume(IdType tetId) const {
             const auto& v = tets[tetId];
-            Vec3 e0 = mVertPos.col(v[1]) - mVertPos.col(v[0]);
-            Vec3 e1 = mVertPos.col(v[2]) - mVertPos.col(v[0]);
-            Vec3 e2 = mVertPos.col(v[3]) - mVertPos.col(v[0]);
-            return std::abs(e0.dot(e1.cross(e2))) / 6.0;
+            // 【重要】必须使用 mRestPos 进行计算
+            Vec3 e0 = mRestPos.col(v[1]) - mRestPos.col(v[0]);
+            Vec3 e1 = mRestPos.col(v[2]) - mRestPos.col(v[0]);
+            Vec3 e2 = mRestPos.col(v[3]) - mRestPos.col(v[0]);
+            return std::abs(e0.dot(e1.cross(e2))) / 6.0f;
         }
 
         /**
@@ -297,7 +305,7 @@ namespace VBD {
         void updateVelocity(FloatingType dt) {
             for (size_t i = 0; i < numVerts; ++i) {
                 if (!isFixed[i]) {
-                    mVelocity.col(i) = (mVertPos.col(i) - mVertPrevPos.col(i)) / dt;
+                    mVelocity.col(i) = (mVertPos.col(i) - mVertPrevPos.col(i)) / dt * 0.999;
                 }
             }
         }

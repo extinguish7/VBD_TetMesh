@@ -28,7 +28,7 @@ namespace VBD {
         Vec3 diff1 = Ds.col(0);
         Vec3 diff2 = Ds.col(1);
         Vec3 diff3 = Ds.col(2);
-        volume = std::abs(diff3.dot(diff1.cross(diff2))) / Real(6.0);
+        volume = std::abs(diff3.dot(diff1.cross(diff2))) / 6.0f;
     }
 
     // 辅助函数：安全计算 log(J)，防止 J <= 0 导致 NaN
